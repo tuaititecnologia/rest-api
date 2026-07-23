@@ -138,18 +138,50 @@ class LeadController extends Controller
 
         $data = $request->all();
 
+        /**
+         * Unlike store(), a partial update must NOT fall back to the default
+         * pipeline's first stage when lead_pipeline_stage_id is absent from the
+         * request. The admin Kanban form always submits the stage, but an API
+         * client may PUT/PATCH a single field. Injecting a default here silently
+         * moves the lead to the pipeline's first stage and — because that stage is
+         * neither "won" nor "lost" — makes the core LeadRepository::update() reset
+         * closed_at to null (the core only recomputes the stage/closed_at when the
+         * key is present in $data). So resolve and attach the stage (and its
+         * pipeline) ONLY when the caller actually supplied one; otherwise the lead
+         * keeps its current stage and closed_at is left untouched.
+         */
         if (! empty($data['lead_pipeline_stage_id'])) {
             $stage = $this->stageRepository->findOrFail($data['lead_pipeline_stage_id']);
 
             $data['lead_pipeline_id'] = $stage->lead_pipeline_id;
-        } else {
-            $pipeline = $this->pipelineRepository->getDefaultPipeline();
+        }
 
-            $stage = $pipeline->stages()->first();
+        /**
+         * Guard against the core repository wiping expected_close_date on a partial
+         * update — the same partial-destructive pattern as the stage above, but this
+         * one lives in the core so we defend it from here. Webkul's
+         * LeadRepository::update() runs
+         *
+         *     if (empty($data['expected_close_date'])) { $data['expected_close_date'] = null; }
+         *
+         * WITHOUT an isset guard, so an API PUT that simply omits the field would
+         * null out the lead's existing expected close date. While the key is
+         * genuinely ABSENT from the request (not merely sent empty — that stays a
+         * deliberate "clear it"), re-inject the lead's current value so it survives.
+         *
+         * Forward-safe workaround: the day the core guards this field with isset()
+         * — the way it already treats lead_pipeline_stage_id — this block just feeds
+         * back the same value the core would keep anyway, so it stays correct and
+         * can be deleted with no behavioural change. If the lead does not exist,
+         * find() returns null and we leave $data untouched so the update still
+         * surfaces the usual 404.
+         */
+        if (! array_key_exists('expected_close_date', $data)) {
+            $current = $this->leadRepository->find($id);
 
-            $data['lead_pipeline_id'] = $pipeline->id;
-
-            $data['lead_pipeline_stage_id'] = $stage->id;
+            if ($current && $current->expected_close_date) {
+                $data['expected_close_date'] = $current->expected_close_date;
+            }
         }
 
         $lead = $this->leadRepository->update($data, $id);
