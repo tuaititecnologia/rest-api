@@ -4,6 +4,11 @@ use Illuminate\Support\Facades\Route;
 
 Route::group(['prefix' => 'v1'], function () {
     /**
+     * Dashboard routes.
+     */
+    require 'dashboard-routes.php';
+
+    /**
      * User routes.
      */
     require 'user-routes.php';

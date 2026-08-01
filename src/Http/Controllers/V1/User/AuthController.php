@@ -25,7 +25,6 @@ class AuthController extends Controller
             'password'    => 'required',
             'device_name' => 'required',
         ]);
-
         $user = $userRepository->where('email', $request->email)->first();
 
         if (! $user || ! Hash::check($request->password, $user->password)) {
